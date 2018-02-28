@@ -2,9 +2,16 @@ package edu.buffalo.cse.cse486586.groupmessenger2;
 
 import android.content.ContentProvider;
 import android.content.ContentValues;
+import android.content.Context;
 import android.database.Cursor;
+import android.database.MatrixCursor;
 import android.net.Uri;
 import android.util.Log;
+
+import java.io.BufferedReader;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStreamReader;
 
 /**
  * GroupMessengerProvider is a key-value table. Once again, please note that we do not implement
@@ -50,6 +57,16 @@ public class GroupMessengerProvider extends ContentProvider {
          * internal storage option that we used in PA1. If you want to use that option, please
          * take a look at the code for PA1.
          */
+        String FILENAME = values.get("key").toString();
+        String string = values.get("value").toString();
+
+        try{
+            FileOutputStream fos = getContext().openFileOutput(FILENAME, Context.MODE_PRIVATE);
+            fos.write(string.getBytes());
+            fos.close();
+        }catch (Exception e){
+            e.printStackTrace();
+        }
         Log.v("insert", values.toString());
         return uri;
     }
@@ -81,6 +98,28 @@ public class GroupMessengerProvider extends ContentProvider {
          * http://developer.android.com/reference/android/database/MatrixCursor.html
          */
         Log.v("query", selection);
-        return null;
+        String[] column_names ={"key","value"};
+        MatrixCursor mc = new MatrixCursor(column_names);
+
+        Log.v("Query:",selection);
+        try{
+            FileInputStream fis = getContext().openFileInput(selection);
+            BufferedReader br = new BufferedReader(new InputStreamReader(fis));
+            String key_value;
+            String value = null;
+            while((key_value=br.readLine())!=null){
+                value=key_value;
+            }
+            br.close();
+            fis.close();
+            Log.v("Query value",value);
+            mc.newRow().add("key",selection).add("value",value.trim());
+
+            mc.close();
+
+        }catch(Exception e){
+            e.printStackTrace();
+        }
+        return mc;
     }
 }
