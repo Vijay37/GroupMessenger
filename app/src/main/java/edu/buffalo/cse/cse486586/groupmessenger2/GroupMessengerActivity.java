@@ -37,7 +37,7 @@ import static android.content.ContentValues.TAG;
  *
  */
 public class GroupMessengerActivity extends Activity {
-    static final String[] REMOTE_PORTS = {"11108","11112"};//,"11116","11120","11124"};
+    static final String[] REMOTE_PORTS = {"11108","11112","11116","11120","11124"};
     static final String REMOTE_PORT0 = "11108";
     static final String REMOTE_PORT1 = "11112";
     static final int SERVER_PORT = 10000;
@@ -97,11 +97,13 @@ public class GroupMessengerActivity extends Activity {
         private int status;
         private float priority;
         private String uniq_id;
-        public message_queue(String content, int status, float priority, String uniq_id){
+        private int delivery_status;
+        public message_queue(String content, int status, float priority, String uniq_id, int delivery_status){
             this.content = content;
             this.status = status;
             this.priority = priority;
             this.uniq_id = uniq_id;
+            this.delivery_status = delivery_status;
         }
         public String getContent() {
             return content;
@@ -118,6 +120,14 @@ public class GroupMessengerActivity extends Activity {
         public String getUniq_id() {
             return uniq_id;
         }
+        public int getDelivery_status() {
+            return delivery_status;
+        }
+
+        public void setDelivery_status(int delivery_status) {
+            this.delivery_status = delivery_status;
+        }
+
         public void setContent(String content) {
             this.content = content;
         }
@@ -139,15 +149,8 @@ public class GroupMessengerActivity extends Activity {
         }
     }
     private class ServerTask extends AsyncTask<ServerSocket, String, Void> {
-        private ContentResolver mContentResolver;
-        private Uri mUri;
-        private OnPTestClickListener Opt;
-        private ArrayList<String> unique_id_list = new ArrayList<String>();
         private int deliverable=1;
         private int not_deliverable=0;
-        private HashMap<String,String> msg_map = new HashMap<String,String>();
-        private HashMap<String,Integer> status_map = new HashMap<String,Integer>();  // 0-NotDeliverable 1-Deliverable
-        private HashMap<String,Float> priority_map = new HashMap<String, Float>();
         private ArrayList<message_queue> msg_queue = new ArrayList<message_queue>();
         private int max_number=0;
         @Override
@@ -190,12 +193,7 @@ public class GroupMessengerActivity extends Activity {
                 Log.v("Message Processing","Content Received");
                 content=msg_split_arr[1];
                 Log.v("Message Processing","Content :"+content);
-                msg_queue.add(new message_queue(content,not_deliverable,proposal,uni_id));
-
-                unique_id_list.add(uni_id);  // adding unique id to array list
-                msg_map.put(uni_id,content); // inserting content with unique id as key
-                status_map.put(uni_id,not_deliverable);  // setting status to not deliverable
-                priority_map.put(uni_id,invalid_priority);
+                msg_queue.add(new message_queue(content,not_deliverable,proposal,uni_id,not_deliverable));
                 return true;
             }
             else if(msg_split_arr.length==3){  // received priority message from sender
@@ -204,9 +202,7 @@ public class GroupMessengerActivity extends Activity {
                 Log.v("Message Processing","Priority :"+priority);
                 priority_float=Float.parseFloat(priority);
                 priority_int=(int) priority_float;
-                priority_map.put(uni_id,priority_float);  // updating the priority
-                status_map.put(uni_id,deliverable); // Changing the status to deliverable
-                if(priority_int>max_number)
+                if(priority_int>max_number)  // updating maximum number heard so far
                     max_number=priority_int;
                 for(message_queue mq : msg_queue){
                     if(mq.getUniq_id().equals(uni_id)){
@@ -221,37 +217,15 @@ public class GroupMessengerActivity extends Activity {
         }
         protected void process_queue(){
             Collections.sort(msg_queue);
-            for(message_queue mq : msg_queue)
-                Log.v("Sorted List",mq.getContent());
-            Log.v("Queue Process","Started");
-            int status;
-            String content;
-            String uId;
-            float priority;
-            boolean process_queue=true;
-            ListIterator uL = unique_id_list.listIterator();
-            HashMap<Float,String> priority_msg_map = new HashMap<Float,String>();
-            ArrayList<Float> priority_list=new ArrayList<Float>();
-            while(uL.hasNext()){
-                uId = uL.next().toString();
-                status = status_map.get(uId);
-                if(status==not_deliverable) {  // check if message is not deliverable
-                    process_queue=false;
+            for(message_queue mq : msg_queue){
+                if(mq.getStatus() == not_deliverable){
                     break;
                 }
-                content = msg_map.get(uId);
-                priority = priority_map.get(uId);
-                priority_list.add(priority);
-                priority_msg_map.put(priority,content);
-            }
-            unique_id_list.clear();
-            if(process_queue){
-                Collections.sort(priority_list);
-                uL = priority_list.listIterator();
-                while(uL.hasNext()){
-                    priority = Float.parseFloat(uL.next().toString());
-                    content = priority_msg_map.get(priority);
-                    store_message(content);
+                else {
+                    if(mq.getDelivery_status()==not_deliverable) {
+                        store_message(mq.getContent());
+                        mq.setDelivery_status(deliverable);
+                    }
                 }
             }
         }
