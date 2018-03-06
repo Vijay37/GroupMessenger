@@ -18,6 +18,7 @@ import android.widget.TextView;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.net.ConnectException;
 import java.net.InetAddress;
@@ -27,12 +28,8 @@ import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.ListIterator;
 
 import static android.content.ContentValues.TAG;
 
@@ -171,21 +168,32 @@ public class GroupMessengerActivity extends Activity {
             String message;
             String priority="";
             Log.v("Server task","created");
+            BufferedReader bR=null;
             while(true){
                 try {
                     // Source : https://docs.oracle.com/javase/tutorial/networking/sockets/clientServer.html
                     Socket client_sock = serverSocket.accept();
                     Log.v("Message received","\n");
-                    BufferedReader bR = new BufferedReader(new InputStreamReader(client_sock.getInputStream()));
+                    bR = new BufferedReader(new InputStreamReader(client_sock.getInputStream()));
                     message = bR.readLine();
+                    message=message.trim();
                     if(process_msg(message,max_number)) {
                         priority = max_number + "." + myPort;
                         PrintWriter out = new PrintWriter(client_sock.getOutputStream(), true);
                         out.println(priority);
                         max_number++;  // Incrementing max number so that other messages will not use this again
                     }
+                    client_sock.close();
                 } catch (IOException e) {
                     e.printStackTrace();
+                }
+                finally {
+                    if(bR!=null)
+                        try {
+                            bR.close();
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
                 }
 
             }
@@ -250,19 +258,25 @@ public class GroupMessengerActivity extends Activity {
         protected void clear_failed_messages(String failed_port){
             Log.v("Clearing Failed msgs :",failed_port);
             String uni_id="";
-//            port_status.put(failed_port,not_deliverable);
+            ArrayList<message_queue> temp_queue = new ArrayList<message_queue>();
+            port_status.put(failed_port,not_deliverable);
             for (message_queue mq : msg_queue) {
                 uni_id = mq.getUniq_id();
                 uni_id = uni_id.substring(uni_id.length()-failed_port.length(),uni_id.length());
                 Log.v("Uni ID after substring",uni_id);
                 if(uni_id.equals(failed_port)){
-                    mq.setDelivery_status(deliverable);
-                    mq.setStatus(deliverable);
+                    temp_queue.add(mq);
+//                    mq.setDelivery_status(deliverable);
+//                    mq.setStatus(deliverable);
                 }
+            }
+            for(message_queue mq : temp_queue){
+                msg_queue.remove(mq);
             }
         }
         protected void process_queue(){
             Collections.sort(msg_queue);
+            ArrayList<message_queue> temp_queue = new ArrayList<message_queue>();
             for(message_queue mq : msg_queue){
                 if(mq.getStatus() == not_deliverable){
                     break;
@@ -270,9 +284,13 @@ public class GroupMessengerActivity extends Activity {
                 else {
                     if(mq.getDelivery_status()==not_deliverable) {
                         store_message(mq.getContent());
-                        mq.setDelivery_status(deliverable);
+                        temp_queue.add(mq);
+//                        mq.setDelivery_status(deliverable);
                     }
                 }
+            }
+            for(message_queue mq : temp_queue){
+                msg_queue.remove(mq);
             }
         }
         protected void store_message(String content){
@@ -319,10 +337,11 @@ public class GroupMessengerActivity extends Activity {
             msgToSend=unique_id+delimiter+msgToSend;  // Adding milliseconds,myport as unique id to message separated by a delimiter
             float prev_count=0;
             float curr_count=0;
-            String max_count="";
-            String recv_priority="";
+            PrintWriter out=null,out1 =null;
             int index = 0;
             String port=null;
+            BufferedReader bR=null;
+            String recv_priority="";
             try {
                 Log.v("Message to send", msgToSend);
                 for(index=0;index<REMOTE_PORTS.length;index++){
@@ -333,18 +352,18 @@ public class GroupMessengerActivity extends Activity {
                     socket = new Socket();
                     socket.connect(new InetSocketAddress(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
                             Integer.parseInt(port)),5000);
-                    PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+                    out = new PrintWriter(socket.getOutputStream(), true);
                     out.println(msgToSend);
-                    BufferedReader bR = new BufferedReader(new InputStreamReader(socket.getInputStream()));// Receive priority from receiver
-                    recv_priority = bR.readLine();
-                    curr_count=Float.parseFloat(recv_priority);
-                    Log.v("Receiver Priority : ",recv_priority);
+                    bR = new BufferedReader(new InputStreamReader(socket.getInputStream()));// Receive priority from receiver
+                    while ((recv_priority = bR.readLine()) != null) {
+                        curr_count = Float.parseFloat(recv_priority);
+                        Log.v("Receiver Priority : ", recv_priority);
 
-                    if(curr_count>prev_count)// Pick the highest priority so far
-                        prev_count=curr_count;
+                        if (curr_count > prev_count)// Pick the highest priority so far
+                            prev_count = curr_count;
+                    }
                     socket.close();
-                    out.close();
-                    bR.close();
+
                 }
                 msgToSend=unique_id+delimiter+"Priority"+delimiter+prev_count;
                 // Sending priorities to receivers
@@ -356,10 +375,9 @@ public class GroupMessengerActivity extends Activity {
                     socket = new Socket();
                     socket.connect(new InetSocketAddress(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
                             Integer.parseInt(port)),500);
-                    PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
-                    out.println(msgToSend);
+                    out1 = new PrintWriter(socket.getOutputStream(), true);
+                    out1.println(msgToSend);
                     socket.close();
-                    out.close();
                 }
             } catch (UnknownHostException e) {
                 Log.e(TAG,"ClientTask UnknownHostException");
@@ -378,19 +396,63 @@ public class GroupMessengerActivity extends Activity {
                 e.printStackTrace();
                 final int e1 = Log.e(TAG, "Connection failed exception : " + index);
                 handle_exception(index,unique_id,prev_count,msgToSend);
+            }finally {
+                    if (out != null) {
+                        out.close();
+                    }
+                    if (out1 != null)
+                        out1.close();
+                    if(bR!=null)
+                        try {
+                            bR.close();
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
             }
 
+            Log.v("Exiting client task","now");
             return null;
         }
+        protected float process_priority(Socket socket,float prev_count,int index, String unique_id,String msgToSend){
+            BufferedReader bR=null;
+            try {
+                String recv_priority = "";
+                float curr_count=0;
+                bR = new BufferedReader(new InputStreamReader(socket.getInputStream()));// Receive priority from receiver
+                while ((recv_priority = bR.readLine()) != null) {
+                    curr_count = Float.parseFloat(recv_priority);
+                    Log.v("Receiver Priority : ", recv_priority);
+
+                    if (curr_count > prev_count)// Pick the highest priority so far
+                        prev_count = curr_count;
+                }
+                return prev_count;
+            }
+            catch(Exception e){
+                e.printStackTrace();
+                handle_exception(index, unique_id,prev_count, msgToSend);
+            }
+            finally{
+                if(bR!=null)
+                    try {
+                        bR.close();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+            }
+            return prev_count;
+        }
         protected void handle_exception(int index, String unique_id,float prev_count, String msgToSend){
+            PrintWriter out=null;
+            BufferedReader bR=null;
             try {
                 String port;
                 Socket socket;
-                Log.v("Unique Id",unique_id);
-                String failed_port = REMOTE_PORTS[index];
-                String abort_msg=unique_id+delimiter+abort_id;
-                String recv_priority="";
                 float curr_count=0;
+
+                String recv_priority="";
+                Log.e(TAG,"handling exception of "+index);
+                String failed_port = REMOTE_PORTS[index];
                 port_status.put(REMOTE_PORTS[index],0); // Setting status of the failed port to not ok
                 for(int index_1=index+1;index_1<REMOTE_PORTS.length;index_1++){
                     port=REMOTE_PORTS[index_1];
@@ -400,18 +462,17 @@ public class GroupMessengerActivity extends Activity {
                     socket = new Socket();
                     socket.connect(new InetSocketAddress(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
                             Integer.parseInt(port)),5000);
-                    PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+                    out = new PrintWriter(socket.getOutputStream(), true);
                     out.println(msgToSend);
-                    BufferedReader bR = new BufferedReader(new InputStreamReader(socket.getInputStream()));// Receive priority from receiver
-                    recv_priority = bR.readLine();
-                    curr_count=Float.parseFloat(recv_priority);
-                    Log.v("Receiver Priority : ",recv_priority);
+                    bR = new BufferedReader(new InputStreamReader(socket.getInputStream()));// Receive priority from receiver
+                    while ((recv_priority = bR.readLine()) != null) {
+                        curr_count = Float.parseFloat(recv_priority);
+                        Log.v("Receiver Priority : ", recv_priority);
 
-                    if(curr_count>prev_count)// Pick the highest priority so far
-                        prev_count=curr_count;
+                        if (curr_count > prev_count)// Pick the highest priority so far
+                            prev_count = curr_count;
+                    }
                     socket.close();
-                    out.close();
-                    bR.close();
                 }
                 Log.v("Exception","maximum count : "+prev_count);
                 msgToSend=unique_id+delimiter+"Priority"+delimiter+prev_count;
@@ -424,10 +485,9 @@ public class GroupMessengerActivity extends Activity {
                     socket = new Socket();
                     socket.connect(new InetSocketAddress(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
                             Integer.parseInt(port)),500);
-                    PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+                    out = new PrintWriter(socket.getOutputStream(), true);
                     out.println(msgToSend);
                     socket.close();
-                    out.close();
                 }
                 String failure_comm_msg=unique_id+delimiter+fail_comm_id+delimiter+failed_port;
                 for(int index_1=0;index_1<REMOTE_PORTS.length;index_1++){
@@ -438,12 +498,24 @@ public class GroupMessengerActivity extends Activity {
                     socket = new Socket();
                     socket.connect(new InetSocketAddress(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
                             Integer.parseInt(port)),500);
-                    PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+                    out = new PrintWriter(socket.getOutputStream(), true);
                     out.println(failure_comm_msg);
                     socket.close();
                 }
             }catch(Exception e1){
                 e1.printStackTrace();
+            }
+            finally {
+                if(out!=null){
+                    out.close();
+                }
+                if(bR!=null){
+                    try {
+                        bR.close();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                }
             }
         }
     }
