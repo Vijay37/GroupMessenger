@@ -11,7 +11,6 @@ emulator-5558 11116
 emulator-5560 11120
 emulator-5562 11124
 
-Implementing the ordering functionality is the bulk of this assignment, and to get full credit
 This application provides ordering functionality of the messages sent to the group.
 It provides ordered messages in the face of the failure of a single app instance during execution. This app provides a total ordering for incoming messages
 among all app instances, and that total ordering should preserve FIFO ordering.
